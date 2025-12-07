@@ -7,7 +7,12 @@
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "keywords": ["weather", "cwa", "express", "api"],
+  "keywords": [
+    "weather",
+    "cwa",
+    "express",
+    "api"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
