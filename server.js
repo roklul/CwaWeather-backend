@@ -16,17 +16,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 /**
- * 取得高雄天氣預報
+ * 取得臺北市天氣預報
  * CWA 氣象資料開放平臺 API
  * 使用「一般天氣預報-今明 36 小時天氣預報」資料集
  */
-const getKaohsiungWeather = async (req, res) => {
+const getTaipeiWeather = async (req, res) => {
   try {
     // 檢查是否有設定 API Key
     if (!CWA_API_KEY) {
+      console.error("錯誤：未設定 CWA_API_KEY");
       return res.status(500).json({
         error: "伺服器設定錯誤",
-        message: "請在 .env 檔案中設定 CWA_API_KEY",
+        message: "請在環境變數中設定 CWA_API_KEY",
       });
     }
 
@@ -37,18 +38,24 @@ const getKaohsiungWeather = async (req, res) => {
       {
         params: {
           Authorization: CWA_API_KEY,
-          locationName: "臺北市",
+          locationName: "臺北市", // 確保這裡請求的是臺北市
+          sort: "time"
         },
       }
     );
 
-    // 取得高雄市的天氣資料
+    // 檢查 API 回傳結構
+    if (!response.data || !response.data.records || !response.data.records.location) {
+        throw new Error("CWA API 回傳格式不符預期");
+    }
+
+    // 取得臺北市的天氣資料
     const locationData = response.data.records.location[0];
 
     if (!locationData) {
       return res.status(404).json({
         error: "查無資料",
-        message: "無法取得高雄市天氣資料",
+        message: "無法取得臺北市天氣資料",
       });
     }
 
@@ -61,45 +68,48 @@ const getKaohsiungWeather = async (req, res) => {
 
     // 解析天氣要素
     const weatherElements = locationData.weatherElement;
-    const timeCount = weatherElements[0].time.length;
+    // 確保有資料才跑迴圈
+    if(weatherElements && weatherElements.length > 0) {
+        const timeCount = weatherElements[0].time.length;
 
-    for (let i = 0; i < timeCount; i++) {
-      const forecast = {
-        startTime: weatherElements[0].time[i].startTime,
-        endTime: weatherElements[0].time[i].endTime,
-        weather: "",
-        rain: "",
-        minTemp: "",
-        maxTemp: "",
-        comfort: "",
-        windSpeed: "",
-      };
+        for (let i = 0; i < timeCount; i++) {
+        const forecast = {
+            startTime: weatherElements[0].time[i].startTime,
+            endTime: weatherElements[0].time[i].endTime,
+            weather: "",   // Wx
+            rain: "",      // PoP
+            minTemp: "",   // MinT
+            maxTemp: "",   // MaxT
+            comfort: "",   // CI
+        };
 
-      weatherElements.forEach((element) => {
-        const value = element.time[i].parameter;
-        switch (element.elementName) {
-          case "Wx":
-            forecast.weather = value.parameterName;
-            break;
-          case "PoP":
-            forecast.rain = value.parameterName + "%";
-            break;
-          case "MinT":
-            forecast.minTemp = value.parameterName + "°C";
-            break;
-          case "MaxT":
-            forecast.maxTemp = value.parameterName + "°C";
-            break;
-          case "CI":
-            forecast.comfort = value.parameterName;
-            break;
-          case "WS":
-            forecast.windSpeed = value.parameterName;
-            break;
+        weatherElements.forEach((element) => {
+            // 避免有些時段資料缺失導致錯誤
+            const timeSlot = element.time[i];
+            if(!timeSlot) return;
+
+            const value = timeSlot.parameter;
+            switch (element.elementName) {
+            case "Wx":
+                forecast.weather = value.parameterName;
+                break;
+            case "PoP":
+                forecast.rain = value.parameterName + "%";
+                break;
+            case "MinT":
+                forecast.minTemp = value.parameterName; // 前端會自己加 °C，後端傳純數字或字串皆可，這裡保留原樣
+                break;
+            case "MaxT":
+                forecast.maxTemp = value.parameterName;
+                break;
+            case "CI":
+                forecast.comfort = value.parameterName;
+                break;
+            }
+        });
+
+        weatherData.forecasts.push(forecast);
         }
-      });
-
-      weatherData.forecasts.push(forecast);
     }
 
     res.json({
@@ -129,9 +139,9 @@ const getKaohsiungWeather = async (req, res) => {
 // Routes
 app.get("/", (req, res) => {
   res.json({
-    message: "歡迎使用 CWA 天氣預報 API",
+    message: "歡迎使用安安天天氣象 API",
     endpoints: {
-      kaohsiung: "/api/weather/kaohsiung",
+      taipei: "/api/weather/taipei", // 更新文件說明
       health: "/api/health",
     },
   });
@@ -141,8 +151,8 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-// 取得高雄天氣預報
-app.get("/api/weather/kaohsiung", getKaohsiungWeather);
+// 修正：路由改為 /api/weather/taipei
+app.get("/api/weather/taipei", getTaipeiWeather);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -157,10 +167,12 @@ app.use((err, req, res, next) => {
 app.use((req, res) => {
   res.status(404).json({
     error: "找不到此路徑",
+    message: `路徑 ${req.path} 不存在`
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 伺服器運行已運作`);
-  console.log(`📍 環境: ${process.env.NODE_ENV || "development"}`);
+  console.log(`🚀 伺服器已啟動，監聽 Port: ${PORT}`);
+  console.log(`📍 目標城市: 臺北市`);
+  console.log(`🔑 API Key 設定狀態: ${CWA_API_KEY ? "已設定" : "未設定 (將無法請求資料)"}`);
 });
